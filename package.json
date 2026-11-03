@@ -41,7 +41,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "for f in *.mjs; do node --check \"$f\" || exit 1; done",
-    "live": "node --test --test-name-pattern='live' test/*.test.mjs"
+    "live": "node scripts/live-check.mjs",
+    "integration": "node scripts/dsh-integration.mjs"
   },
   "dsh": {
     "bundle": {

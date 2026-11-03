@@ -85,12 +85,20 @@ SONIOX_API_KEY=your-soniox-key
 ## 测试
 
 ```bash
-npm test          # 20 个离线测试，mock 掉 HTTP，不需要凭据
-npm run live      # 真实跑一次 TTS -> STT 往返；需要 SONIOX_API_KEY 和 ffmpeg
+npm test              # 20 个离线测试，mock 掉 HTTP，不需要凭据
+npm run live          # 真实跑一次 TTS -> STT 往返；需要 SONIOX_API_KEY 和 ffmpeg
+npm run integration   # 挂进真实的 DSH 语音服务；需要 SONIOX_API_KEY、ffmpeg 和 DSH 运行时
 ```
 
 `npm run live` 会用 Soniox TTS 合成中文语音，转成 DSH 交给 provider 的精确格式
 （16 kHz 单声道 PCM16 WAV），经本包转写，然后**重新读取远端资源**证明已删除（应为 HTTP 404）。
+
+`npm run integration` 会用 `@deepseek-ai/cordis` 启动真实的
+`@deepseek-ai/dsh-experimental-speech-to-text` 服务，按 Host 的方式挂载本插件，断言 provider
+名单、语言校验，并走一次真实的 `ctx.speechToText` 转写调用。`DSH_ROOT` 指向你的 DSH 运行时
+（默认 `/home/ubuntu/apps/deepseek-harness`）。
+
+本机实测：7.4 秒中文音频端到端约 2.3 秒（`stt-async-v5`，上传 + 建任务 + 轮询 + 取文本）。
 
 ## 排错
 

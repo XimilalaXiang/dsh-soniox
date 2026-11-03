@@ -89,13 +89,23 @@ Defaults, editable in the plugin's settings entry or directly in a profile patch
 ## Testing
 
 ```bash
-npm test          # 20 offline tests, mocked HTTP, no credentials
-npm run live      # one real TTS -> STT round trip; needs SONIOX_API_KEY and ffmpeg
+npm test              # 20 offline tests, mocked HTTP, no credentials
+npm run live          # one real TTS -> STT round trip; needs SONIOX_API_KEY and ffmpeg
+npm run integration   # mounts into the real DSH speech service; needs SONIOX_API_KEY, ffmpeg, DSH
 ```
 
 `npm run live` synthesizes Chinese speech with Soniox TTS, converts it to the exact container DSH
 hands a provider (16 kHz mono PCM16 WAV), transcribes it through this package, then proves the remote
 objects were deleted by re-reading them (expects HTTP 404).
+
+`npm run integration` boots `@deepseek-ai/cordis` with the real
+`@deepseek-ai/dsh-experimental-speech-to-text` service, mounts this plugin the way the Host does, and
+asserts the provider roster, the language guard and one real `transcribe()` call through
+`ctx.speechToText`. Point `DSH_ROOT` at your DSH runtime (default
+`/home/ubuntu/apps/deepseek-harness`).
+
+Measured on this host: a 7.4 s Chinese clip round-trips in ~2.3 s end to end
+(`stt-async-v5`, upload + create + poll + transcript).
 
 ## Troubleshooting
 
