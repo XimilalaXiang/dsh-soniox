@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Soniox 语音",
+    "description": "DeepSeek Harness 的原生 BYOK Soniox 语音转文字。录音使用你自己的 SONIOX_API_KEY 发送到 api.soniox.com，转写完成后即删除。"
+  }
+}

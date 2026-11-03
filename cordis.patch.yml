@@ -1,0 +1,27 @@
+# Bundle layer for dsh-soniox.
+#
+# Installing the package mounts these rows, so the plugin appears in the
+# settings plugin list where it can be switched off or removed like any other.
+#
+# Row 1 mounts the Host voice-input stack, rows 2-3 its browser side, row 4 the
+# Soniox recognizer; `defaultProvider: soniox` makes Soniox the selected
+# recognizer without any settings write. Nothing downloads a local model.
+#
+# NOTE: the ids below are the same ones the official voice-input bundle uses.
+# Enable either that bundle OR this one — enabling both inserts each id twice
+# and the loader rejects the duplicate.
+- insert:
+    - id: speech-to-text
+      name: '@deepseek-ai/dsh-experimental-speech-to-text'
+      config:
+        defaultProvider: soniox
+        language: auto
+    - id: api-speech-to-text
+      name: '@deepseek-ai/dsh-experimental-api-speech-to-text'
+    - id: ui-voice-input
+      name: '@deepseek-ai/dsh-experimental-client-ui-voice-input'
+    - id: dsh-soniox
+      name: 'dsh-soniox'
+      config:
+        model: stt-async-v5
+        apiKeyEnv: SONIOX_API_KEY

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Soniox Speech",
+    "description": "Native BYOK Soniox speech-to-text for DeepSeek Harness. Records are sent to api.soniox.com with your own SONIOX_API_KEY and deleted after transcription."
+  }
+}
