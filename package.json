@@ -1,6 +1,6 @@
 {
   "name": "dsh-soniox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native BYOK Soniox speech-to-text provider for DeepSeek Harness (SONIOX_API_KEY).",
   "type": "module",
   "main": "./index.mjs",
@@ -49,10 +49,15 @@
       "patch": "./cordis.patch.yml"
     }
   },
-  "dependencies": {
+  "peerDependencies": {
     "@deepseek-ai/dsh-experimental-api-speech-to-text": ">=0.2.1-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-experimental-client-ui-voice-input": ">=0.2.1-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-experimental-speech-to-text": ">=0.2.1-rc.1 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-experimental-api-speech-to-text": { "optional": true },
+    "@deepseek-ai/dsh-experimental-client-ui-voice-input": { "optional": true },
+    "@deepseek-ai/dsh-experimental-speech-to-text": { "optional": true }
   },
   "engines": {
     "node": ">=22"

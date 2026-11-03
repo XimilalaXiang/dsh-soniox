@@ -39,6 +39,9 @@ dsh plugin --profile <profile> add dsh-soniox
 > **只能启用一个语音 bundle。** 这些 id 与官方 voice-input bundle 相同。官方 bundle 与本包
 > 二者只启其一；同时启用会导致同一 id 被插入两次，加载器会直接拒绝。
 
+语音相关包声明为 *optional peer*，不是 dependency：它们由 DSH 运行时自带，版本必然与运行中的
+harness 一致。若把副本打进依赖，pnpm 会解析到更新的版本，DSH 的版本守卫会因此把这几行整个禁用。
+
 把密钥写进 `$DSH_HOME/.env`：
 
 ```bash

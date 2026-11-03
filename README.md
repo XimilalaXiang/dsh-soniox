@@ -42,6 +42,10 @@ happens and nothing has to be selected by hand.
 > **One bundle at a time.** These rows use the same ids as the official voice-input bundle. Enable
 > either that bundle **or** this one; enabling both inserts each id twice and the loader rejects it.
 
+The voice-input packages are declared as *optional peers*, never dependencies: DSH supplies them from
+its own runtime, so the versions always match the running harness. Shipping a copy would let pnpm
+resolve a newer release and the version guard would then disable those rows entirely.
+
 Add the key to `$DSH_HOME/.env`:
 
 ```bash
