@@ -1,20 +1,27 @@
-// dsh-soniox — native BYOK Soniox speech-to-text provider for DeepSeek Harness.
+// dsh-soniox — native BYOK Soniox speech for DeepSeek Harness.
 //
-// Registers one `SpeechProvider` (id `soniox`) into `ctx.speechToText`
-// (@deepseek-ai/dsh-experimental-speech-to-text, the DSH voice-input service
-// definition). The Host's own microphone UI then lists it next to any local
-// recognizer, and the Remote path (`speechController`) works unchanged.
+// Two halves, because the harness offers two different kinds of seam:
 //
-// Scope: speech-to-text only. DSH has no speech-synthesis service — the
-// voice-input subsystem states outright that "streaming recognition and speech
-// synthesis have no service methods" — so TTS is not part of this package.
+//   * STT registers a real provider (id `soniox`) into `ctx.speechToText`
+//     (@deepseek-ai/dsh-experimental-speech-to-text), so the Host microphone UI
+//     lists it beside any local recognizer.
+//   * TTS has no service to register into — the voice-input subsystem states
+//     that "streaming recognition and speech synthesis have no service
+//     methods" — so it mounts its own authenticated Fetch routes plus an agent
+//     tool (see tts-host.mjs) and a browser surface (client.mjs).
 //
-// The provider receives one complete canonical 16 kHz mono PCM16 WAV and does
-// no audio conversion: Soniox's file API auto-detects WAV headers.
-import { readFileSync } from 'node:fs';
+// The STT provider receives one complete canonical 16 kHz mono PCM16 WAV and
+// does no audio conversion: Soniox's file API auto-detects WAV headers.
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { LANGUAGES, languageHints, normalizeLanguage } from './languages.mjs';
+import { resolveApiKey as resolveKey } from './secrets.mjs';
 import { SonioxClient, SonioxError, wavSeconds } from './soniox.mjs';
+import { TTS_FORMATS, TTS_MAX_CHARACTERS } from './tts.mjs';
+import { mountTts } from './tts-host.mjs';
+
+export { resolveApiKey } from './secrets.mjs';
 
 export const name = 'dsh-soniox';
 
@@ -87,9 +94,64 @@ export function normalizeProvider(input = {}) {
   });
 }
 
+const DEFAULT_TTS_MODEL = 'tts-rt-v2';
+const DEFAULT_TTS_VOICE = 'Meilin';
+const DEFAULT_TTS_LANGUAGE = 'zh';
+const DEFAULT_TTS_FORMAT = 'mp3';
+const DEFAULT_CACHE_BYTES = 64 * 1024 * 1024;
+
+function ttsLanguage(value) {
+  const code = normalizeLanguage(value ?? DEFAULT_TTS_LANGUAGE);
+  if (!code) throw invalid('tts.language must be a language code');
+  return code;
+}
+
+function ttsFormat(value) {
+  if (value === undefined) return DEFAULT_TTS_FORMAT;
+  const format = requireString(value, 'tts.format');
+  // Unknown formats are refused rather than silently degraded: the caller asked
+  // for a container, and quietly returning mp3 is worse than failing.
+  if (!TTS_FORMATS[format]) {
+    throw invalid(`tts.format must be one of: ${Object.keys(TTS_FORMATS).join(', ')}`);
+  }
+  return format;
+}
+
+/**
+ * TTS settings. Absent means "mount the defaults", because the plugin is
+ * installed precisely to get speech out; `enabled: false` turns it off.
+ */
+export function normalizeTts(input = {}, provider = undefined) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid('tts must be an object');
+  const dataDir = optionalString(input.dataDir, 'tts.dataDir')
+    ?? join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-soniox');
+  const maxCharacters = positiveInt(input.maxCharacters, 'tts.maxCharacters') ?? TTS_MAX_CHARACTERS;
+  return Object.freeze({
+    enabled: input.enabled !== false,
+    model: requireString(input.model ?? DEFAULT_TTS_MODEL, 'tts.model'),
+    voice: requireString(input.voice ?? DEFAULT_TTS_VOICE, 'tts.voice'),
+    language: ttsLanguage(input.language),
+    format: ttsFormat(input.format),
+    sampleRate: positiveInt(input.sampleRate, 'tts.sampleRate'),
+    bitrate: positiveInt(input.bitrate, 'tts.bitrate'),
+    url: optionalString(input.url, 'tts.url'),
+    maxCharacters,
+    dataDir,
+    cacheMaxBytes: positiveInt(input.cacheMaxBytes, 'tts.cacheMaxBytes') ?? DEFAULT_CACHE_BYTES,
+    speakable: input.speakable !== false,
+    autoSpeak: input.autoSpeak === true,
+    apiKeyEnv: typeof input.apiKeyEnv === 'string' && input.apiKeyEnv.trim()
+      ? input.apiKeyEnv.trim()
+      : provider?.apiKeyEnv ?? DEFAULT_API_KEY_ENV,
+    apiKeyRef: optionalString(input.apiKeyRef, 'tts.apiKeyRef') ?? provider?.apiKeyRef ?? null,
+    apiKeyFile: optionalString(input.apiKeyFile, 'tts.apiKeyFile') ?? provider?.apiKeyFile ?? null,
+  });
+}
+
 /** `providers: [...]` registers several recognizers; a flat config one. */
 export function normalizeConfig(config = {}) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw invalid('config must be an object');
+  const tts = normalizeTts(config.tts ?? {});
   if (config.providers !== undefined) {
     if (!Array.isArray(config.providers) || config.providers.length === 0) {
       throw invalid('providers must be a non-empty array');
@@ -98,46 +160,9 @@ export function normalizeConfig(config = {}) {
     if (new Set(providers.map((entry) => entry.id)).size !== providers.length) {
       throw invalid('provider ids must be unique');
     }
-    return Object.freeze({ providers: Object.freeze(providers) });
+    return Object.freeze({ providers: Object.freeze(providers), tts });
   }
-  return Object.freeze({ providers: Object.freeze([normalizeProvider(config)]) });
-}
-
-/**
- * Read the API key: the Host credential store, then an environment variable,
- * then a file.
- *
- * A `CredentialRef` in DSH is an environment-variable-shaped name that resolves
- * through the provider-managed store first and ambient fallbacks (`$DSH_HOME/.env`,
- * `process.env`) afterwards, so one `resolve()` call covers both the stored-secret
- * and the exported-variable case. Resolution happens per recording, so a key
- * stored later is picked up without restarting the Host.
- */
-export async function resolveApiKey(options, ctx, { hasCredentials } = {}) {
-  const credentials = hasCredentials ?? (typeof ctx?.get === 'function' ? ctx.get('credentials') : null);
-  const ref = options.apiKeyRef ?? options.apiKeyEnv;
-  if (ref && typeof credentials?.resolve === 'function') {
-    try {
-      const resolved = await credentials.resolve(ref);
-      const value = typeof resolved?.value === 'string' ? resolved.value.trim() : '';
-      if (value) return value;
-    } catch {
-      // An unreachable credential store falls through to the ambient layers.
-    }
-  }
-  if (options.apiKeyEnv) {
-    const value = process.env[options.apiKeyEnv];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  if (options.apiKeyFile) {
-    try {
-      const value = readFileSync(options.apiKeyFile, 'utf8').trim();
-      if (value) return value;
-    } catch {
-      // A missing key file simply leaves the key empty; the caller reports it.
-    }
-  }
-  return '';
+  return Object.freeze({ providers: Object.freeze([normalizeProvider(config)]), tts });
 }
 
 /**
@@ -162,7 +187,7 @@ export function createProvider(options, ctx, deps = {}) {
       if (!input || !(input.audio instanceof Uint8Array) || input.audio.length === 0) {
         throw new SonioxError('Soniox transcription requires a non-empty recording');
       }
-      const key = await resolveApiKey(options, ctx);
+      const key = await resolveKey(options, ctx);
       if (!key) {
         throw new SonioxError(
           `Soniox API key is unavailable (${options.apiKeyEnv}); add it to $DSH_HOME/.env or the Host credential store`,
@@ -203,9 +228,17 @@ export function createProvider(options, ctx, deps = {}) {
   };
 }
 
-/** Register every configured recognizer for the lifetime of this plugin. */
+/**
+ * Register every configured recognizer and mount the TTS surface.
+ *
+ * The two halves attach to different seams, and a profile can have one without
+ * the other: the STT half needs `speechToText` (declared in `inject`), while TTS
+ * needs `connection` + `tools`, which a headless profile may not provide. So TTS
+ * waits through `ctx.inject()` instead of forcing the whole plugin to depend on
+ * the web stack.
+ */
 export function apply(ctx, config = {}) {
-  const { providers } = normalizeConfig(config);
+  const { providers, tts } = normalizeConfig(config);
   ctx.effect(() => {
     const disposers = providers.map((options) => ctx.speechToText.register(createProvider(options, ctx)));
     return () => {
@@ -213,6 +246,17 @@ export function apply(ctx, config = {}) {
     };
   });
   ctx.logger?.info?.(`[dsh-soniox] registered ${providers.length} Soniox speech provider(s)`);
+
+  if (tts.enabled) {
+    if (typeof ctx.inject !== 'function') {
+      ctx.logger?.debug?.('[dsh-soniox] ctx.inject is unavailable; TTS surface not mounted');
+    } else {
+      ctx.inject(['connection', 'tools'], (scope) => {
+        mountTts(scope, tts);
+        scope.logger?.info?.(`[dsh-soniox] speech synthesis mounted (${tts.voice}, ${tts.model}, ${tts.format})`);
+      });
+    }
+  }
 }
 
 export default Object.freeze({ name, inject, apply });

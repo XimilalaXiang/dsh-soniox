@@ -23,5 +23,13 @@
     - id: dsh-soniox
       name: 'dsh-soniox'
       config:
+        # Speech-to-text: the recognizer the microphone UI offers.
         model: stt-async-v5
         apiKeyEnv: SONIOX_API_KEY
+        # Speech synthesis: routes + the `speak` tool. Remove the block (or set
+        # enabled: false) to install only the recognizer.
+        tts:
+          voice: Meilin
+          language: zh
+          model: tts-rt-v2
+          format: mp3

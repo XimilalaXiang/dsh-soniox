@@ -1,7 +1,7 @@
 {
   "name": "dsh-soniox",
-  "version": "0.1.1",
-  "description": "Native BYOK Soniox speech-to-text provider for DeepSeek Harness (SONIOX_API_KEY).",
+  "version": "0.2.0",
+  "description": "Native BYOK Soniox speech for DeepSeek Harness: speech-to-text provider and text-to-speech routes (SONIOX_API_KEY).",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
@@ -13,6 +13,12 @@
     "index.mjs",
     "soniox.mjs",
     "languages.mjs",
+    "tts.mjs",
+    "tts-host.mjs",
+    "speakable.mjs",
+    "cache.mjs",
+    "secrets.mjs",
+    "runtime.mjs",
     "cordis.patch.yml",
     "locale/",
     "README.md",
@@ -26,7 +32,9 @@
     "dsh-plugin",
     "soniox",
     "speech-to-text",
+    "text-to-speech",
     "stt",
+    "tts",
     "voice-input",
     "byok"
   ],
@@ -42,6 +50,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "for f in *.mjs; do node --check \"$f\" || exit 1; done",
     "live": "node scripts/live-check.mjs",
+    "live:tts": "node scripts/live-tts.mjs",
     "integration": "node scripts/dsh-integration.mjs"
   },
   "dsh": {

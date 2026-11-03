@@ -6,14 +6,19 @@ DeepSeek Harness 的**原生 BYOK** Soniox 语音转文字（STT）插件，prov
 
 [English](README.md) | 中文
 
-## 为什么只有 STT
+## 这个插件做什么
+
+| 半边 | 挂载方式 | 状态 |
+|---|---|---|
+| **STT**（`soniox`） | 真正的 provider，注册进 `ctx.speechToText`，麦克风 UI 会列出它 | 已发布 |
+| **TTS** | DSH 没有对应服务，本包自建鉴权路由（`POST /api/dsh-soniox/speak`、`GET /api/dsh-soniox/audio`）+ agent 工具 `speak` | 已发布 |
+| 每条回复旁的朗读按钮 | 客户端 UI bundle，挂 `conversation.chat.assistant-actions` | 下一步 |
 
 DSH 的语音输入子系统有 provider 注册表，但**没有语音合成服务**：服务定义里写得很明确——
 "服务没有流式识别或语音合成方法"（`@deepseek-ai/dsh-experimental-speech-to-text`）。
-也就是说 TTS 在 DSH 里没有宿主槽位可插，本包不会自己造一个。
-
-姊妹项目 [hermes-soniox](https://github.com/XimilalaXiang/hermes-soniox) 两半都有，是因为
-Hermes 两个 provider 槽位都存在。这里 STT 部分是忠实移植，TTS 部分在 DSH 暂无对应物。
+TTS 在 DSH 里没有宿主槽位可插，所以本包用的是 harness 自己给"功能自带下载"用的那类 seam。
+姊妹项目 [hermes-soniox](https://github.com/XimilalaXiang/hermes-soniox) 两半都有，
+是因为 Hermes 两个 provider 槽位都存在；这里只有 STT 半边有对应物。
 
 ## 安装
 
@@ -57,6 +62,7 @@ SONIOX_API_KEY=your-soniox-key
 | 功能 | 目的地 | 发送内容 |
 |---|---|---|
 | STT | `https://api.soniox.com/v1`（`/files`、`/transcriptions`） | 录音（16 kHz 单声道 PCM16 WAV）、语言提示、可选上下文文本 |
+| TTS | `https://tts-rt.soniox.com/tts` | 要朗读的文本、音色、模型、语言、音频格式 |
 
 录音上传并转写后会**被删除**——成功、失败、取消三条路径都删。Soniox 自身的留存与计费条款
 适用于你发送的任何内容。
@@ -85,11 +91,50 @@ SONIOX_API_KEY=your-soniox-key
   异步文件接口。实时 WebSocket 会牺牲全局上下文精度，且按流时长计费。实测一段 7.4 秒中文
   音频端到端约 2.3 秒（见下）。
 
+## 语音合成
+
+```yaml
+- id: dsh-soniox
+  name: 'dsh-soniox'
+  config:
+    tts:
+      enabled: true         # false 则只装识别器
+      voice: Meilin         # 任意 GET /v1/tts-models 里的音色名
+      language: zh
+      model: tts-rt-v2
+      format: mp3           # mp3 | wav | opus | flac | aac | pcm_s16le
+      speakable: true       # 朗读前先清洗 Markdown
+      maxCharacters: 5000   # 单次请求计费字符上限
+      dataDir: ~/.dsh/dsh-soniox
+```
+
+两个入口，同一条流水线：
+
+- **agent 工具 `speak`** —— `speak({ text, voice?, format?, file? })`，写出一个音频文件并返回路径。
+  这条路径在 headless / Remote / 各种 Bot 前端里同样可用。
+- **宿主路由** —— `POST /api/dsh-soniox/speak` 返回 `{ id, url, characters, cached }`，
+  `GET /api/dsh-soniox/audio?id=...` 返回音频字节，带
+  `Cache-Control: private, immutable, no-transform`，浏览器可以直接把 `<audio>` 指向它。
+  两条路由都由 Host 自己的浏览器会话策略鉴权，只有 owner peer 能到达。
+
+几个关键细节：
+
+- **按内容缓存**：id 同时哈希文本和所有合成参数，重播一条回复、重开一个会话、连点两次按钮
+  都不会重复计费。
+- **先清洗 Markdown**：代码块、表格、链接、`MEDIA:` 路径、裸 URL、emoji 都会在合成前去掉
+  （`speakable.mjs`）——直接朗读这些内容没法听。设 `speakable: false` 可原样发送。
+- **没有 `speed` 设置**：Soniox REST 只接受 model / language / voice / audio_format / text /
+  sample_rate / bitrate，没有 speed 字段，所以本包不做任何夹紧或透传（Hermes 插件发过这个字段，
+  API 会忽略）。要调节奏请用 `sampleRate`/`bitrate`。
+- **延迟**：本机实测 43 个中文字符的一次请求/响应合成约 7.9 秒，13 字符的 WAV 约 2.4 秒。
+  下一步是按句流式合成；缓存已保证重复播放是瞬时的。
+
 ## 测试
 
 ```bash
 npm test              # 20 个离线测试，mock 掉 HTTP，不需要凭据
-npm run live          # 真实跑一次 TTS -> STT 往返；需要 SONIOX_API_KEY 和 ffmpeg
+npm run live      # 真实跑一次 TTS -> STT 往返；需要 SONIOX_API_KEY 和 ffmpeg
+npm run live:tts  # 通过路由和工具真实合成一次；需要 SONIOX_API_KEY 和 ffprobe
 npm run integration   # 挂进真实的 DSH 语音服务；需要 SONIOX_API_KEY、ffmpeg 和 DSH 运行时
 ```
 

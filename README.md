@@ -6,16 +6,21 @@ middleman, no runtime dependencies (standard library + global `fetch` only).
 
 English | [中文](README.zh.md)
 
-## Scope: STT only, and why
+## What it does
+
+| Half | Seam | Status |
+|---|---|---|
+| **STT** (`soniox`) | a real provider in `ctx.speechToText`; the microphone UI lists it | shipped |
+| **TTS** | no service exists — this package mounts its own authenticated routes (`POST /api/dsh-soniox/speak`, `GET /api/dsh-soniox/audio`) plus an agent tool `speak` | shipped |
+| Read-aloud button above each reply | a client UI bundle on `conversation.chat.assistant-actions` | next |
 
 DSH's voice-input subsystem has a provider registry but **no speech-synthesis service** — the
 service definition states plainly that "streaming recognition and speech synthesis have no
 service methods" (`@deepseek-ai/dsh-experimental-speech-to-text`). A TTS half therefore has no
-host slot to plug into, and this package does not invent one.
-
-The sibling Hermes plugin ([hermes-soniox](https://github.com/XimilalaXiang/hermes-soniox))
-ships both halves because Hermes has both provider slots. Here the STT half is a faithful port;
-the TTS half has no counterpart in DSH today.
+host slot to plug into, so it builds the same kind of seam the harness itself uses for
+feature-owned downloads. The sibling Hermes plugin
+([hermes-soniox](https://github.com/XimilalaXiang/hermes-soniox)) ships both halves through
+Hermes' two provider slots; only the STT half has a counterpart here.
 
 ## Install
 
@@ -61,9 +66,11 @@ written to config or logs, and is redacted from every error message this package
 | Feature | Destination | Data sent |
 |---|---|---|
 | STT | `https://api.soniox.com/v1` (`/files`, `/transcriptions`) | the recording (16 kHz mono PCM16 WAV), language hints, optional context text |
+| TTS | `https://tts-rt.soniox.com/tts` | the text to speak, voice, model, language, audio format |
 
 Recording audio is uploaded, transcribed, and then **deleted** — on success, failure and cancellation
-alike. Soniox's own retention and billing terms apply to anything you send.
+alike. Synthesized audio stays on this machine; the text that produced it does not. Soniox's own
+retention and billing terms apply to anything you send.
 
 ## Configuration
 
@@ -90,11 +97,52 @@ Defaults, editable in the plugin's settings entry or directly in a profile patch
   for a finished recording is the async file path. The realtime socket gives up full-context accuracy
   and bills stream duration. A 7.4-second Chinese clip round-trips in ~2.3 s end to end (see below).
 
+## Speech synthesis
+
+```yaml
+- id: dsh-soniox
+  name: 'dsh-soniox'
+  config:
+    tts:
+      enabled: true         # false installs only the recognizer
+      voice: Meilin         # any name from GET /v1/tts-models
+      language: zh
+      model: tts-rt-v2
+      format: mp3           # mp3 | wav | opus | flac | aac | pcm_s16le
+      speakable: true       # strip markdown before speaking
+      maxCharacters: 5000   # billed characters per request
+      dataDir: ~/.dsh/dsh-soniox
+```
+
+Two surfaces, one pipeline:
+
+- **Agent tool `speak`** — `speak({ text, voice?, format?, file? })` writes an audio file and returns
+  its path. This is the path that also works headless, over Remote, and for any bot front end.
+- **Host routes** — `POST /api/dsh-soniox/speak` returns `{ id, url, characters, cached }` and
+  `GET /api/dsh-soniox/audio?id=...` serves the bytes with `Cache-Control: private, immutable,
+  no-transform`, so a browser can point an `<audio>` element at it. Both are authenticated by the
+  Host's own browser-session policy; only the owner peer reaches them.
+
+Details that matter:
+
+- **Cached by content.** The id hashes the text *and* every synthesis parameter, so replaying a reply,
+  re-opening a session, or pressing a button twice never bills twice.
+- **Markdown is normalized first.** Code fences, tables, links, `MEDIA:` paths, bare URLs and emoji
+  are removed before synthesis (`speakable.mjs`) — speaking them raw is unusable. Set
+  `speakable: false` to send the text verbatim.
+- **No `speed` setting.** Soniox's REST schema accepts model, language, voice, audio_format, text,
+  sample_rate and bitrate — there is no speed field, so nothing is clamped or forwarded (the Hermes
+  plugin sent one; the API ignores it). Use `sampleRate`/`bitrate` instead.
+- **Latency**: request/response synthesis of a 43-character Chinese line measured ~7.9 s wall time on
+  this host, and 13 characters of WAV ~2.4 s. Per-sentence streaming is the next improvement; the
+  cache keeps repeat playback instant.
+
 ## Testing
 
 ```bash
 npm test              # 20 offline tests, mocked HTTP, no credentials
 npm run live          # one real TTS -> STT round trip; needs SONIOX_API_KEY and ffmpeg
+npm run live:tts      # real synthesis through the routes and the tool; needs SONIOX_API_KEY + ffprobe
 npm run integration   # mounts into the real DSH speech service; needs SONIOX_API_KEY, ffmpeg, DSH
 ```
 
@@ -118,6 +166,14 @@ Measured on this host: a 7.4 s Chinese clip round-trips in ~2.3 s end to end
 - *HTTP 400 / invalid_request* — model name or language hint not valid for that model.
   `curl -H "Authorization: Bearer $SONIOX_API_KEY" https://api.soniox.com/v1/models` lists them.
 - *"transcription timed out"* — very long audio; raise `pollTimeoutMs`.
+- *"Soniox API key is unavailable"* from the routes or `speak` — same key, same fix as above.
+- *HTTP 422 "nothing to speak"* — after markdown normalization the text held nothing pronounceable
+  (an empty reply, or a pure code block / file-path message).
+- *HTTP 413* — the request exceeds `tts.maxCharacters`; raise it deliberately, it is billed per
+  character.
+- Audio plays nothing in a browser — check the audio route's response headers include
+  `content-type: audio/*`; a generic `application/octet-stream` is replaced by the requested format
+  for exactly that reason.
 - Provider missing from the picker — check the Host log for `[dsh-soniox] registered`, confirm the
   bundle is in `bundles`, and that no other voice-input bundle is enabled.
 
